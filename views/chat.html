@@ -49,8 +49,15 @@
 <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
+  const ROOM_ID = "{{room.id}}";
+
   const socket = io.connect("http://localhost:8005/chat", {
     path: "/socket.io",
+  });
+
+  // 소켓 연결 완료 후 1회: 입장 시스템 메시지 저장 + 브로드캐스트
+  socket.on("connect", () => {
+    axios.post(`/room/${ROOM_ID}/system/join`).catch(console.error);
   });
 
   // ====== 참여자 렌더 헬퍼 ======
@@ -137,7 +144,7 @@
   // (서버 socket.js에서 socket.on("who") 핸들러를 이미 넣어뒀어)
   socket.emit("who");
 
-  // 폼/업로드  
+  // 폼/업로드
   document.querySelector("#chat-form").addEventListener("submit", function (e) {
     e.preventDefault();
     if (e.target.chat.value) {
@@ -153,7 +160,7 @@
         });
     }
   });
-  
+
   document.querySelector("#gif").addEventListener("change", function (e) {
     console.log(e.target.files);
     const formData = new FormData();
@@ -166,6 +173,25 @@
       .catch((err) => {
         console.error(err);
       });
+  });
+
+  // 방 나가기 버튼 클릭 시, 라우터 호출 후 메인으로 이동
+  document.getElementById("exit-btn")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    try {
+      await axios.post(`/room/${ROOM_ID}/system/exit`);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      location.href = "/";
+    }
+  });
+
+  // 페이지 닫기/새로고침 시에도 퇴장 시도 (응답 기다리지 않음)
+  window.addEventListener("beforeunload", () => {
+    const url = `/room/${ROOM_ID}/system/exit`;
+    const data = new Blob([], { type: "application/json" });
+    navigator.sendBeacon(url, data);
   });
 </script>
 {% endblock %}

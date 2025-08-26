@@ -80,12 +80,6 @@ module.exports = (server, app, sessionMiddleware) => {
     // 참여자 목록을 방 전체에 블로드 캐스트
     broadcastParticipants(chat, roomId);
 
-    socket.to(roomId).emit("join", {
-      user: "system",
-      chat: `${color}님이 입장하셨습니다.`,
-      participants: getParticipants(chat, roomId),
-    });
-
     // 클라이언트가 현재 목록을 요청할 때
     socket.on("who", () => {
       socket.emit("room:participants", getParticipants(chat, roomId));
@@ -113,12 +107,6 @@ module.exports = (server, app, sessionMiddleware) => {
           })
           .then(() => console.log("방 제거 요청 성공"))
           .catch((error) => console.error(error));
-      } else {
-        socket.to(roomId).emit("exit", {
-          user: "system",
-          chat: `${color}님이 퇴장하셨습니다.`,
-          participants: getParticipants(chat, roomId),
-        });
       }
 
       // 최신 참여자 목록을 한 번 더 브로드캐스트 (중복되어도 안전함)

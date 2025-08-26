@@ -90,10 +90,10 @@ router.delete("/room/:id", async (req, res, next) => {
     await Chat.deleteMany({ room: id });
 
     // 4) 방 삭제
-    await room.deleteOne(); 
+    await room.deleteOne();
 
     // 5) 응답
-    return res.status(204).end(); 
+    return res.status(204).end();
   } catch (err) {
     next(err);
   }
@@ -143,6 +143,47 @@ router.post("/room/:id/gif", upload.single("gif"), async (req, res, next) => {
     res.send("ok");
   } catch (error) {
     console.error(error);
+    next(error);
+  }
+});
+
+// 시스템 메시지: 입장
+router.post("/room/:id/system/join", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const msg = `${req.session.color}님이 입장하셨습니다.`;
+    const saved = await Chat.create({ room: id, user: "system", chat: msg });
+    console.log("[JOIN] system chat saved:", saved._id.toString(), "room:", id);
+
+    // 방에 브로드캐스트
+    req.app.get("io").of("/chat").to(id).emit("join", {
+      user: "system",
+      chat: msg,
+    });
+
+    res.send("ok");
+  } catch (error) {
+    console.error("[JOIN] failed:", err);
+    next(error);
+  }
+});
+
+// 시스템 메시지 : 퇴장
+router.post("/room/:id/system/exit", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const msg = `${req.session.color}님이 퇴장하셨습니다.`;
+    const saved = await Chat.create({ room: id, user: "system", chat: msg });
+    console.log("[EXIT] system chat saved:", saved._id.toString(), "room:", id);
+
+    req.app.get("io").of("/chat").to(id).emit("exit", {
+      user: "system",
+      chat: msg,
+    });
+
+    res.send("ok");
+  } catch (error) {
+    console.error("[EXIT] failed:", err);
     next(error);
   }
 });
