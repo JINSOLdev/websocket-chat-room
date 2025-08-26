@@ -1,0 +1,31 @@
+const mongoose = require("mongoose");
+
+const { MONGO_ID, MONGO_PASSWORD, NODE_ENV } = process.env;
+const MONGO_URL = `mongodb://${encodeURIComponent(
+  MONGO_ID
+)}:${encodeURIComponent(MONGO_PASSWORD)}@127.0.0.1:27017/admin`;
+
+const connect = async () => {
+  if (NODE_ENV !== "production") {
+    mongoose.set("debug", true);
+  }
+
+  try {
+    await mongoose.connect(MONGO_URL, {
+      dbName: "gifchat",
+    });
+    console.log("✅ MongoDB connected");
+  } catch (error) {
+    console.error("몽고디비 연결 에러", error);
+  }
+};
+
+mongoose.connection.on("error", (error) => {
+  console.error("몽고디비 연결 에러", error);
+});
+mongoose.connection.on("disconnected", () => {
+  console.error("몽고디비 연결이 끊겼습니다. 연결을 재시도합니다.");
+  connect();
+});
+
+module.exports = connect;
