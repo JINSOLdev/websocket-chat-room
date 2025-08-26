@@ -1,5 +1,16 @@
 {% extends 'layout.html' %} {% block content %}
 <h1>{{title}}</h1>
+<!-- 상단 우측에 참여자 수/목록 -->
+<div class="room-meta">
+  <div class="room-meta__right">
+    <span class="pill"> 참여자 <span id="member-count">0</span>명 </span>
+    <button id="toggle-members" type="button" class="ghost">목록</button>
+  </div>
+</div>
+
+<!-- 클릭 시 토글되는 참여자 목록 -->
+<ul id="member-list" class="member-list hidden"></ul>
+
 <a href="/" id="exit-btn">방 나가기</a>
 <fieldset>
   <legend>채팅 내용</legend>
@@ -41,6 +52,34 @@
   const socket = io.connect("http://localhost:8005/chat", {
     path: "/socket.io",
   });
+
+  // ====== 참여자 렌더 헬퍼 ======
+  function renderParticipants(payload) {
+    if (!payload) return;
+    const { count, members } = payload;
+
+    const countEl = document.getElementById("member-count");
+    if (countEl) countEl.textContent = String(count);
+
+    const listEl = document.getElementById("member-list");
+    if (listEl) {
+      listEl.innerHTML = "";
+      members.forEach((m) => {
+        const li = document.createElement("li");
+        // 서버에서 label(=color 또는 닉네임 비슷한 라벨)을 내려줌
+        li.textContent = m.label || m.socketId?.slice(0, 5) || "알 수 없음";
+        listEl.appendChild(li);
+      });
+    }
+  }
+
+  // 목록 토글 버튼
+  document.getElementById("toggle-members")?.addEventListener("click", () => {
+    const listEl = document.getElementById("member-list");
+    if (!listEl) return;
+    listEl.classList.toggle("hidden");
+  });
+
   socket.on("join", function (data) {
     const div = document.createElement("div");
     div.classList.add("system");
@@ -48,7 +87,11 @@
     div.textContent = data.chat;
     div.appendChild(chat);
     document.querySelector("#chat-list").appendChild(div);
+
+    // join payload에 participants가 함께 오면 즉시 반영
+    if (data.participants) renderParticipants(data.participants);
   });
+
   socket.on("exit", function (data) {
     const div = document.createElement("div");
     div.classList.add("system");
@@ -56,7 +99,12 @@
     div.textContent = data.chat;
     div.appendChild(chat);
     document.querySelector("#chat-list").appendChild(div);
+
+    // exit payload에 participants가 함께 오면 즉시 반영
+    if (data.participants) renderParticipants(data.participants);
   });
+
+  // 채팅 메시지
   socket.on("chat", function (data) {
     const div = document.createElement("div");
     if (data.user === "{{user}}") {
@@ -79,6 +127,17 @@
     div.style.color = data.user;
     document.querySelector("#chat-list").appendChild(div);
   });
+
+  // 참여자 목록 브로드캐스트 수신 (서버에서 room:participants 쏨)
+  socket.on("room:participants", (payload) => {
+    renderParticipants(payload);
+  });
+
+  // 새로고침 직후에도 목록을 보장하고 싶으면 1회 요청
+  // (서버 socket.js에서 socket.on("who") 핸들러를 이미 넣어뒀어)
+  socket.emit("who");
+
+  // 폼/업로드  
   document.querySelector("#chat-form").addEventListener("submit", function (e) {
     e.preventDefault();
     if (e.target.chat.value) {
@@ -94,6 +153,7 @@
         });
     }
   });
+  
   document.querySelector("#gif").addEventListener("change", function (e) {
     console.log(e.target.files);
     const formData = new FormData();

@@ -24,6 +24,27 @@ module.exports = (server, app, sessionMiddleware) => {
   const room = io.of("/room");
   const chat = io.of("/chat");
 
+  // 참여자 라벨 저장 : socket.id -> 닉네임/표시이름
+  const labelBySocketId = new Map();
+
+  // 방 참여자 목록 계산
+  function getParticipants(namespace, roomId) {
+    const set = namespace.adapter.rooms.get(roomId);
+    const ids = set ? [...set] : [];
+    const members = ids.map((sid) => ({
+      socketId: sid,
+      label: labelBySocketId.get(sid) || sid.slice(0, 5),
+    }));
+    return { roomId, count: members.length, members };
+  }
+
+  // 방 전체에 참여자 목록 브로드캐스트
+  function broadcastParticipants(namespace, roomId) {
+    namespace
+      .to(roomId)
+      .emit("room:participants", getParticipants(namespace, roomId));
+  }
+
   const wrap = (mw) => (socket, next) =>
     mw(socket.request, socket.request.res || {}, next);
 
@@ -53,14 +74,29 @@ module.exports = (server, app, sessionMiddleware) => {
     const color =
       (req.session && req.session.color) || stringToColor(sessionId);
 
+    // 지금은 color 문자열을 사용자 라벨로 사용
+    labelBySocketId.set(socket.id, color);
+
+    // 참여자 목록을 방 전체에 블로드 캐스트
+    broadcastParticipants(chat, roomId);
+
     socket.to(roomId).emit("join", {
       user: "system",
       chat: `${color}님이 입장하셨습니다.`,
+      participants: getParticipants(chat, roomId),
+    });
+
+    // 클라이언트가 현재 목록을 요청할 때
+    socket.on("who", () => {
+      socket.emit("room:participants", getParticipants(chat, roomId));
     });
 
     socket.on("disconnect", () => {
       console.log("chat 네임스페이스 접속 해제");
       socket.leave(roomId);
+
+      // 내 라벨 정리
+      labelBySocketId.delete(socket.id);
 
       const currentRoom = socket.adapter.rooms.get(roomId);
       const userCount = currentRoom ? currentRoom.size : 0;
@@ -81,8 +117,12 @@ module.exports = (server, app, sessionMiddleware) => {
         socket.to(roomId).emit("exit", {
           user: "system",
           chat: `${color}님이 퇴장하셨습니다.`,
+          participants: getParticipants(chat, roomId),
         });
       }
+
+      // 최신 참여자 목록을 한 번 더 브로드캐스트 (중복되어도 안전함)
+      broadcastParticipants(chat, roomId);
     });
   });
 };
