@@ -104,3 +104,7 @@ table td {
 .hidden {
   display: none;
 }
+.whisper {
+  opacity: 0.9;
+  font-style: italic;
+}

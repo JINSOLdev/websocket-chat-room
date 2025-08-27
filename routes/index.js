@@ -149,6 +149,7 @@ router.post("/room/:id/gif", upload.single("gif"), async (req, res, next) => {
 
 // 시스템 메시지: 입장
 router.post("/room/:id/system/join", async (req, res, next) => {
+  console.log("[JOIN]", req.sessionID, req.session.color);
   try {
     const { id } = req.params;
     const msg = `${req.session.color}님이 입장하셨습니다.`;
@@ -163,7 +164,7 @@ router.post("/room/:id/system/join", async (req, res, next) => {
 
     res.send("ok");
   } catch (error) {
-    console.error("[JOIN] failed:", err);
+    console.error("[JOIN] failed:", error);
     next(error);
   }
 });

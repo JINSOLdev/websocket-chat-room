@@ -1,9 +1,15 @@
+// ‼️ TODO:
+// - 귓속말 중복 전송 방지(emit 경로 단일화)
+// - 퇴장 메시지 이중 전송 방지(버튼 클릭 시 beforeunload 중복 차단 플래그 유지 점검)
+// - (정책 결정) 마지막 사용자 퇴장 시 채팅 보존/아카이브 방식 검토
+
+
 const SocketIO = require("socket.io");
 const axios = require("axios");
 const cookieParser = require("cookie-parser");
 const cookie = require("cookie-signature");
 
-// 유틸 함수
+// 공용 색상 해시
 function stringToColor(str = "") {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -21,10 +27,11 @@ function stringToColor(str = "") {
 module.exports = (server, app, sessionMiddleware) => {
   const io = SocketIO(server, { path: "/socket.io" });
   app.set("io", io);
+
   const room = io.of("/room");
   const chat = io.of("/chat");
 
-  // 참여자 라벨 저장 : socket.id -> 닉네임/표시이름
+  // 참여자 라벨 저장 : socket.id -> 표시 라벨(여기서는 color)
   const labelBySocketId = new Map();
 
   // 방 참여자 목록 계산
@@ -45,11 +52,31 @@ module.exports = (server, app, sessionMiddleware) => {
       .emit("room:participants", getParticipants(namespace, roomId));
   }
 
+  // express 미들웨어를 socket.io에 래핑
   const wrap = (mw) => (socket, next) =>
     mw(socket.request, socket.request.res || {}, next);
 
+  // 전역 미들웨어
   io.use(wrap(cookieParser(process.env.SESSION_SECRET)));
   io.use(wrap(sessionMiddleware));
+
+  // 네임스페이스에도 확실히 같은 미들웨어 적용 (세션 없어서 터지는 것 방지)
+  [room, chat].forEach((nsp) => {
+    nsp.use(wrap(cookieParser(process.env.SESSION_SECRET)));
+    nsp.use(wrap(sessionMiddleware));
+    // 세션 color 보장 미들웨어
+    nsp.use((socket, next) => {
+      const req = socket.request;
+      if (!req.session) req.session = {};
+      if (!req.session.color) {
+        req.session.color = stringToColor(req.sessionID || socket.id);
+        try {
+          req.session.save?.();
+        } catch {}
+      }
+      next();
+    });
+  });
 
   room.on("connection", (socket) => {
     console.log("room 네임스페이스에 접속");
@@ -62,6 +89,7 @@ module.exports = (server, app, sessionMiddleware) => {
     console.log("chat 네임스페이스에 접속");
     const req = socket.request;
 
+    // 방 ID 추출
     const { referer = "" } = req.headers || {};
     const roomId = referer
       .split("/")
@@ -69,27 +97,57 @@ module.exports = (server, app, sessionMiddleware) => {
 
     socket.join(roomId);
 
-    // 세션이 없거나 color가 없어도 절대 크래시하지 않도록
-    const sessionId = req.sessionID || socket.id || "";
-    const color =
-      (req.session && req.session.color) || stringToColor(sessionId);
-
-    // 지금은 color 문자열을 사용자 라벨로 사용
+    // 세션 color만 사용 (재계산 금지)
+    const color = req.session.color;
     labelBySocketId.set(socket.id, color);
 
-    // 참여자 목록을 방 전체에 블로드 캐스트
+    // 참여자 목록 브로드캐스트
     broadcastParticipants(chat, roomId);
 
-    // 클라이언트가 현재 목록을 요청할 때
+    // 현재 목록 요청 응답
     socket.on("who", () => {
       socket.emit("room:participants", getParticipants(chat, roomId));
     });
+
+    socket.data.roomId = roomId;
+
+    // 귓속말 전송
+    socket.on("whisper:send", ({ to, chat: msg }) => {
+      const rid = socket.data.roomId || roomId;
+      if (!to || !msg) return;
+
+      const set = socket.adapter.rooms.get(rid);
+      if (!set || !set.has(to)) {
+        socket.emit("whisper:error", { message: "상대가 방에 없습니다." });
+        return;
+      }
+      if (to === socket.id) {
+        socket.emit("whisper:error", {
+          message: "자기 자신에게는 보낼 수 없어요.",
+        });
+        return;
+      }
+
+      const payload = {
+        user: socket.request.session.color, // 세션 color만 사용
+        chat: msg,
+        fromSocketId: socket.id,
+        toSocketId: to,
+        roomId: rid,
+        private: true,
+      };
+
+      socket.to(to).emit("whisper", payload);
+      socket.emit("whisper", payload); // echo
+    });
+
+    // 디버그: 세션 확인
+    console.log("[SOCK]", req.sessionID, req.session?.color);
 
     socket.on("disconnect", () => {
       console.log("chat 네임스페이스 접속 해제");
       socket.leave(roomId);
 
-      // 내 라벨 정리
       labelBySocketId.delete(socket.id);
 
       const currentRoom = socket.adapter.rooms.get(roomId);
@@ -109,7 +167,6 @@ module.exports = (server, app, sessionMiddleware) => {
           .catch((error) => console.error(error));
       }
 
-      // 최신 참여자 목록을 한 번 더 브로드캐스트 (중복되어도 안전함)
       broadcastParticipants(chat, roomId);
     });
   });

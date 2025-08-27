@@ -15,21 +15,16 @@ const app = express();
 
 app.set("port", process.env.PORT || 8005);
 app.set("view engine", "html");
-nunjucks.configure("views", {
-  express: app,
-  watch: true,
-});
+nunjucks.configure("views", { express: app, watch: true });
 connect();
 
 const sessionMiddleware = session({
   resave: false,
   saveUninitialized: false,
   secret: process.env.SESSION_SECRET,
-  cookie: {
-    httpOnly: true,
-    secure: false,
-  },
+  cookie: { httpOnly: true, secure: false },
 });
+
 app.use(morgan("dev"));
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/gif", express.static(path.join(__dirname, "uploads")));
@@ -38,11 +33,12 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser(process.env.SESSION_SECRET));
 app.use(sessionMiddleware);
 
+// 공용 색상 해시
 function stringToColor(str = "") {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    hash |= 0; // 32bit 정수
+    hash |= 0;
   }
   let color = "#";
   for (let i = 0; i < 3; i++) {
@@ -52,10 +48,12 @@ function stringToColor(str = "") {
   return color;
 }
 
+// 모든 HTTP 요청에서 세션 color 보장 + 템플릿에 내려주기
 app.use((req, res, next) => {
   if (!req.session.color) {
     req.session.color = stringToColor(req.sessionID || "");
   }
+  res.locals.user = req.session.color; // 템플릿 {{ user }}
   next();
 });
 
